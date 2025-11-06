@@ -177,6 +177,23 @@ def clean_url(url):
     return url
 
 
+def extract_domain_from_url(url: str) -> str:
+    """Extract the domain from a URL string safely."""
+    try:
+        # Ensure scheme for urlparse
+        if not re.match(r'^https?://', url, re.IGNORECASE):
+            url_to_parse = 'http://' + url
+        else:
+            url_to_parse = url
+        from urllib.parse import urlparse
+        parsed = urlparse(url_to_parse)
+        host = parsed.netloc or parsed.path.split('/')[0]
+        # Strip www.
+        host = re.sub(r'^www\.', '', host, flags=re.IGNORECASE)
+        return host.lower()
+    except Exception:
+        return ''
+
 def extract_credentials(line):
     """
     Extract user:pass combinations from various formats:
@@ -374,7 +391,7 @@ def extract_erc_tokens(line):
 
 
 # Search by domain - optimized for large files
-def search_domain(query):
+def search_domain(query, include_schemes: bool = False):
     # Clean and validate the domain
     domain = clean_url(query)
     if not domain or '.' not in domain:
@@ -400,6 +417,9 @@ def search_domain(query):
                     line = line.strip()
                     
                     if domain in line.lower():
+                        # Skip non-http(s) scheme lines if disabled
+                        if (not include_schemes) and re.match(r'^[a-z][a-z0-9+.-]*://', line, re.IGNORECASE) and not re.match(r'^https?://', line, re.IGNORECASE):
+                            continue
                         # Extract credentials from the line
                         credentials = extract_credentials(line)
                         
@@ -486,7 +506,7 @@ def search_domain(query):
 
 
 # Search by keywords - optimized for large files
-def search_keywords(keywords):
+def search_keywords(keywords, include_schemes: bool = False):
     if not keywords:
         return {'all': [], 'user_pass': [], 'url_user_pass': [], 'urls': [], 'erc_tokens': []}
     
@@ -510,27 +530,46 @@ def search_keywords(keywords):
                     line = line.strip()
                     # Case-insensitive search
                     if keywords.lower() in line.lower():
+                        # Skip non-http(s) scheme lines if disabled
+                        if (not include_schemes) and re.match(r'^[a-z][a-z0-9+.-]*://', line, re.IGNORECASE) and not re.match(r'^https?://', line, re.IGNORECASE):
+                            continue
                         # Extract all possible credentials from line
                         credentials = extract_credentials(line)
-                        
+
+                        kw = keywords.lower()
                         for cred in credentials:
-                            # Check if the credential contains the keyword
-                            if keywords.lower() in cred.lower():
-                                # For user:pass formats (doesn't start with http and has exactly one colon)
-                                if ':' in cred and not cred.lower().startswith('http') and cred.count(':') == 1:
+                            lc = cred.lower()
+                            # Advanced filtering: only keep when keyword is in meaningful parts
+                            # 1) Pure user:pass => keyword must appear in user or pass
+                            if ':' in cred and not lc.startswith('http') and cred.count(':') == 1:
+                                user_part, pass_part = cred.split(':', 1)
+                                if kw in user_part.lower() or kw in pass_part.lower():
                                     if cred not in user_pass_results:
                                         user_pass_results.append(cred)
-                                # For URL:user:pass formats
-                                elif cred.lower().startswith('http') and ':' in cred:
+                                continue
+
+                            # 2) URL:USER:PASS => keyword must be in domain or user or pass; ignore non-http schemes
+                            if re.match(r'^https?://', cred, re.IGNORECASE) and cred.count(':') >= 2:
+                                try:
+                                    url_part, user_part, pass_part = cred.rsplit(':', 2)
+                                except ValueError:
+                                    url_part = cred
+                                    user_part = pass_part = ''
+                                domain = extract_domain_from_url(url_part)
+                                if (kw in domain) or (kw in user_part.lower()) or (kw in pass_part.lower()):
                                     if cred not in url_user_pass_results:
                                         url_user_pass_results.append(cred)
+                                continue
                         
                         # Extract URLs from the line if it matches the keyword
                         urls = extract_urls(line)
                         for url in urls:
-                            if keywords.lower() in url.lower():
-                                if url not in url_results:
-                                    url_results.append(url)
+                            # Only accept http/https and require keyword in domain or full URL
+                            if re.match(r'^https?://', url, re.IGNORECASE):
+                                domain = extract_domain_from_url(url)
+                                if kw in domain or kw in url.lower():
+                                    if url not in url_results:
+                                        url_results.append(url)
                         
                         # Extract ERC tokens from the line if it matches the keyword
                         erc_tokens = extract_erc_tokens(line)
@@ -716,6 +755,7 @@ def search():
     if request.method == 'POST':
         search_type = request.form.get('search_type')
         query = request.form.get('query')
+        include_schemes = request.form.get('include_schemes') == 'on'
         
         if not query:
             flash('Please enter a search query', 'error')
@@ -723,13 +763,14 @@ def search():
         
         results = {}
         if search_type == 'domain':
-            results = search_domain(query)
+            results = search_domain(query, include_schemes=include_schemes)
         elif search_type == 'keyword':
-            results = search_keywords(query)
+            results = search_keywords(query, include_schemes=include_schemes)
         
         # Store query and type in session for download functionality
         session['search_query'] = query
         session['search_type'] = search_type
+        session['include_schemes'] = include_schemes
         
         return render_template(
             'search_results.html',
@@ -738,6 +779,7 @@ def search():
             url_user_pass_results=results.get('url_user_pass', []),
             query=query,
             search_type=search_type,
+            include_schemes=include_schemes,
         )
     
     return render_template('search.html')
@@ -877,13 +919,14 @@ def download_results(search_type):
     # Get the most recent search from session
     search_query = session.get('search_query', 'recent')
     search_type_session = session.get('search_type', 'domain')
+    include_schemes = session.get('include_schemes', False)
     
     # Perform the search again to get the results
     results = {}
     if search_type_session == 'domain':
-        results = search_domain(search_query)
+        results = search_domain(search_query, include_schemes=include_schemes)
     elif search_type_session == 'keyword':
-        results = search_keywords(search_query)
+        results = search_keywords(search_query, include_schemes=include_schemes)
     
     # Select the appropriate result type
     if search_type == 'user_pass':
@@ -1366,6 +1409,12 @@ document.getElementById('uploadForm').addEventListener('submit', function(e) {
                         <input type="text" class="form-control" id="query" name="query" placeholder="Enter domain or keyword to search" required>
                         <div class="form-text">For domain search: enter domain name (e.g., google.com)</div>
                     </div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" value="on" id="include_schemes" name="include_schemes">
+                        <label class="form-check-label" for="include_schemes">
+                            Include non-http schemes (e.g., android://)
+                        </label>
+                    </div>
                     <button type="submit" class="btn btn-primary">Search</button>
                     <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Cancel</a>
                 </form>
@@ -1409,11 +1458,129 @@ document.getElementById('uploadForm').addEventListener('submit', function(e) {
             </div>
             <div class="card-body">
                 {% if results %}
-                <!-- Buttons to show/hide different result types -->
-                <div class="mb-3">
-                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleResults('all')">Show All Results</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleResults('user_pass')">Show User:Pass Only</button>
-                    <button type="button" class="btn btn-sm btn-outline-success" onclick="toggleResults('url_user_pass')">Show URL:User:Pass Only</button>
+                <!-- Global pagination controls -->
+                <div class="d-flex align-items-center justify-content-end mb-2 gap-2">
+                    <label class="form-label mb-0 me-2"><small>Page size</small></label>
+                    <select id="page-size-select" class="form-select form-select-sm" style="width:auto;">
+                        <option value="100">100</option>
+                        <option value="200" selected>200</option>
+                        <option value="500">500</option>
+                        <option value="1000">1000</option>
+                    </select>
+                </div>
+                <!-- Collapsible result sections to reduce DOM load -->
+                <div class="accordion" id="resultsAccordion">
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="headingAll">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseAll" aria-expanded="false" aria-controls="collapseAll">
+                                <i class="fas fa-list me-2"></i> All Results ({{ results|length }})
+                            </button>
+                        </h2>
+                        <div id="collapseAll" class="accordion-collapse collapse" aria-labelledby="headingAll" data-bs-parent="#resultsAccordion">
+                            <div class="accordion-body">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <small class="text-muted">Showing <span id="all-shown-count">0</span> of {{ results|length }}</small>
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-outline-primary" onclick="loadNext('all')">Load next page</button>
+                                        <button class="btn btn-sm btn-outline-secondary" onclick="loadAll('all')">Load all</button>
+                                        <button class="btn btn-sm btn-outline-dark" onclick="resetSection('all')">Reset</button>
+                                    </div>
+                                </div>
+                                <div class="table-responsive">
+                                    <table class="table table-striped" id="all-results">
+                                        <thead>
+                                            <tr>
+                                                <th>#</th>
+                                                <th>Credential Entry</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for result in results %}
+                                            <tr class="all-row" style="display:none;">
+                                                <td>{{ loop.index }}</td>
+                                                <td><code>{{ result }}</code></td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="headingUserPass">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseUserPass" aria-expanded="false" aria-controls="collapseUserPass">
+                                <i class="fas fa-user-lock me-2"></i> User:Pass ({{ user_pass_results|length }})
+                            </button>
+                        </h2>
+                        <div id="collapseUserPass" class="accordion-collapse collapse" aria-labelledby="headingUserPass" data-bs-parent="#resultsAccordion">
+                            <div class="accordion-body">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <small class="text-muted">Showing <span id="userpass-shown-count">0</span> of {{ user_pass_results|length }}</small>
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-outline-primary" onclick="loadNext('userpass')">Load next page</button>
+                                        <button class="btn btn-sm btn-outline-secondary" onclick="loadAll('userpass')">Load all</button>
+                                        <button class="btn btn-sm btn-outline-dark" onclick="resetSection('userpass')">Reset</button>
+                                    </div>
+                                </div>
+                                <div class="table-responsive">
+                                    <table class="table table-striped" id="user-pass-results">
+                                        <thead>
+                                            <tr>
+                                                <th>#</th>
+                                                <th>User:Pass Entry</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for result in user_pass_results %}
+                                            <tr class="userpass-row" style="display:none;">
+                                                <td>{{ loop.index }}</td>
+                                                <td><code>{{ result }}</code></td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="headingUrlUserPass">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseUrlUserPass" aria-expanded="false" aria-controls="collapseUrlUserPass">
+                                <i class="fas fa-link me-2"></i> URL:User:Pass ({{ url_user_pass_results|length }})
+                            </button>
+                        </h2>
+                        <div id="collapseUrlUserPass" class="accordion-collapse collapse" aria-labelledby="headingUrlUserPass" data-bs-parent="#resultsAccordion">
+                            <div class="accordion-body">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <small class="text-muted">Showing <span id="urluserpass-shown-count">0</span> of {{ url_user_pass_results|length }}</small>
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-outline-primary" onclick="loadNext('urluserpass')">Load next page</button>
+                                        <button class="btn btn-sm btn-outline-secondary" onclick="loadAll('urluserpass')">Load all</button>
+                                        <button class="btn btn-sm btn-outline-dark" onclick="resetSection('urluserpass')">Reset</button>
+                                    </div>
+                                </div>
+                                <div class="table-responsive">
+                                    <table class="table table-striped" id="url-user-pass-results">
+                                        <thead>
+                                            <tr>
+                                                <th>#</th>
+                                                <th>URL:User:Pass Entry</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for result in url_user_pass_results %}
+                                            <tr class="urluserpass-row" style="display:none;">
+                                                <td>{{ loop.index }}</td>
+                                                <td><code>{{ result }}</code></td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 
                 <!-- Download buttons -->
@@ -1498,21 +1665,71 @@ document.getElementById('uploadForm').addEventListener('submit', function(e) {
 </div>
 
 <script>
-function toggleResults(type) {
-    // Hide all tables
-    document.getElementById('all-results').style.display = 'none';
-    document.getElementById('user-pass-results').style.display = 'none';
-    document.getElementById('url-user-pass-results').style.display = 'none';
-    
-    // Show selected table
-    if (type === 'all') {
-        document.getElementById('all-results').style.display = 'table';
-    } else if (type === 'user_pass') {
-        document.getElementById('user-pass-results').style.display = 'table';
-    } else if (type === 'url_user_pass') {
-        document.getElementById('url-user-pass-results').style.display = 'table';
-    }
+// Lazy-display rows to reduce DOM rendering cost with paging
+const DEFAULT_PAGE_SIZE = 200;
+
+function getPageSize() {
+  const sel = document.getElementById('page-size-select');
+  const val = sel ? parseInt(sel.value, 10) : DEFAULT_PAGE_SIZE;
+  return isNaN(val) ? DEFAULT_PAGE_SIZE : val;
 }
+
+function showInitial() {
+  const size = getPageSize();
+  ['all','userpass','urluserpass'].forEach(kind => loadMore(kind, size));
+}
+
+function loadMore(kind, count) {
+  const rows = document.querySelectorAll(`.${kind}-row`);
+  let shown = 0;
+  rows.forEach(r => { if (r.style.display !== 'none') shown++; });
+  let added = 0;
+  for (let i = shown; i < rows.length && added < count; i++) {
+    rows[i].style.display = '';
+    added++;
+  }
+  updateShownCounts();
+}
+
+function loadNext(kind) {
+  loadMore(kind, getPageSize());
+}
+
+function loadAll(kind) {
+  const rows = document.querySelectorAll(`.${kind}-row`);
+  rows.forEach(r => r.style.display = '');
+  updateShownCounts();
+}
+
+function resetSection(kind) {
+  const rows = document.querySelectorAll(`.${kind}-row`);
+  rows.forEach(r => r.style.display = 'none');
+  loadMore(kind, getPageSize());
+}
+
+function updateShownCounts() {
+  const kinds = [
+    ['all','all-shown-count'],
+    ['userpass','userpass-shown-count'],
+    ['urluserpass','urluserpass-shown-count']
+  ];
+  kinds.forEach(([kind, id]) => {
+    const rows = document.querySelectorAll(`.${kind}-row`);
+    let shown = 0;
+    rows.forEach(r => { if (r.style.display !== 'none') shown++; });
+    const el = document.getElementById(id);
+    if (el) el.innerText = shown;
+  });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  showInitial();
+  const sel = document.getElementById('page-size-select');
+  if (sel) sel.addEventListener('change', () => {
+    // Reset and re-apply first page for each section when page size changes
+    ['all','userpass','urluserpass'].forEach(kind => resetSection(kind));
+  });
+});
 </script>
 {% endblock %}'''
     
