@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Catbox Download - Credential Manager{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Download from Catbox</h1>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0"><i class="fas fa-cloud-download-alt me-2"></i>Enter Catbox Link</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="catbox_link" class="form-label">Catbox Download Link</label>
+                        <input type="url" class="form-control" id="catbox_link" name="catbox_link" placeholder="https://files.catbox.moe/..." required>
+                        <div class="form-text">Paste the Catbox download link to download the file</div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Download File</button>
+                    <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Cancel</a>
+                </form>
+            </div>
+        </div>
+        
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0"><i class="fas fa-info-circle me-2"></i>How to Use</h5>
+            </div>
+            <div class="card-body">
+                <ol>
+                    <li>Go to <a href="https://catbox.moe" target="_blank">Catbox.moe</a> and upload your large file</li>
+                    <li>Copy the download link provided after upload</li>
+                    <li>Paste the link in the form above</li>
+                    <li>Click "Download File" to save it to your account</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

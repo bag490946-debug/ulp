@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Credential Manager{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Dashboard</h1>
+</div>
+
+<div class="row">
+    <div class="col-md-6 mb-4">
+        <div class="card feature-card">
+            <div class="card-body text-center">
+                <div class="bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center" style="width: 60px; height: 60px;">
+                    <i class="fas fa-upload fa-2x"></i>
+                </div>
+                <h5 class="card-title mt-3">Upload Files</h5>
+                <p class="card-text">Upload credential files up to 1GB to local storage for searching and management</p>
+                <a href="{{ url_for('upload') }}" class="btn btn-primary">Upload Now</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mb-4">
+        <div class="card feature-card">
+            <div class="card-body text-center">
+                <div class="bg-success text-white rounded-circle d-inline-flex align-items-center justify-content-center" style="width: 60px; height: 60px;">
+                    <i class="fas fa-search fa-2x"></i>
+                </div>
+                <h5 class="card-title mt-3">Search Credentials</h5>
+                <p class="card-text">Find specific credentials by domain or keyword</p>
+                <a href="{{ url_for('search') }}" class="btn btn-success">Search Now</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mb-4">
+        <div class="card feature-card">
+            <div class="card-body text-center">
+                <div class="bg-warning text-white rounded-circle d-inline-flex align-items-center justify-content-center" style="width: 60px; height: 60px;">
+                    <i class="fas fa-folder fa-2x"></i>
+                </div>
+                <h5 class="card-title mt-3">My Files</h5>
+                <p class="card-text">Manage your uploaded credential files in local storage</p>
+                <a href="{{ url_for('files') }}" class="btn btn-warning">View Files</a>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<div class="row mt-5">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0"><i class="fas fa-history me-2"></i>Recent Files</h5>
+            </div>
+            <div class="card-body">
+                {% if files %}
+                <div class="list-group">
+                    {% for file_id, file_name, file_size, file_path, upload_date in files %}
+                    <a href="{{ url_for('view_file', file_id=file_id) }}" class="list-group-item list-group-item-action">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h6 class="mb-1">{{ file_name }}</h6>
+                            <small>{{ file_size }}</small>
+                        </div>
+                        <small>Uploaded on {{ upload_date[:10] }}</small>
+                    </a>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-muted">No files uploaded yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0"><i class="fas fa-clock me-2"></i>Recent Searches</h5>
+            </div>
+            <div class="card-body">
+                {% if history %}
+                <div class="list-group">
+                    {% for query, search_type, result_count, search_date in history %}
+                    <div class="list-group-item">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h6 class="mb-1">{{ query }}</h6>
+                            <small class="text-muted">{{ search_type.title() }}</small>
+                        </div>
+                        <p class="mb-1">Results: {{ result_count }}</p>
+                        <small class="text-muted">{{ search_date[:16] }}</small>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-muted">No search history yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
