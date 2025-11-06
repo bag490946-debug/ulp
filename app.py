@@ -183,7 +183,7 @@ def extract_credentials(line):
     - Format 1: https://example.com/user:pass -> https://example.com:user:pass
     - Format 2: https://example.com:username:password -> https://example.com:username:password
     - Format 3: user@domain:pass -> user@domain:pass
-    - Format 4: user:pass -> user:pass
+    - Format 4: user:pass -> user:pass (including emails, usernames, phone numbers)
     """
     line = line.strip()
     extracted = []
@@ -200,29 +200,67 @@ def extract_credentials(line):
     for email_part, pass_part in matches:
         extracted.append(f"{email_part}:{pass_part}")
 
-    # Pattern 1: URL with user:pass format after a path segment (keep triple for url_user_pass list)
-    url_log_pass_pattern = re.compile(r'(https?://[^\s/]+/[^:\s]+):([^:\s]+):([^:\s]+)', re.IGNORECASE)
+    # Pattern 1: email:pass (preserving email:pass format) - Check this first to avoid conflicts
+    email_pattern = re.compile(r'([^:\s]+@[^:\s]+):([^:\s]+)')
+    matches = email_pattern.findall(line)
+    for match in matches:
+        email_part = match[0]  # email
+        pass_part = match[1]  # pass
+        email_pass_combo = f"{email_part}:{pass_part}"
+        if email_pass_combo not in extracted:
+            extracted.append(email_pass_combo)
+
+    # Pattern 2: URL with user:pass after a path segment
+    # Support http/https and protocol-less URLs starting with www.
+    url_log_pass_pattern = re.compile(r'((?:https?://|www\.)[^\s/]+/[^:\s]+):([^:\s]+):([^:\s]+)', re.IGNORECASE)
     matches = url_log_pass_pattern.findall(line)
     for match in matches:
         url_part = match[0]
         user_part = match[1]
         pass_part = match[2]
-        extracted.append(f"{url_part}:{user_part}:{pass_part}")
+        triple_combo = f"{url_part}:{user_part}:{pass_part}"
+        if triple_combo not in extracted:
+            extracted.append(triple_combo)
+        # Also emit plain user:pass for filtered results
+        user_pass_combo = f"{user_part}:{pass_part}"
+        if user_pass_combo not in extracted:
+            extracted.append(user_pass_combo)
     
-    # Pattern 2: URL:username:password format (keep triple; also emit email:pass if username is an email)
-    url_user_pass_pattern = re.compile(r'(https?://[^\s]+):([^:\s]+):([^\s]+)', re.IGNORECASE)
+    # Pattern 3: URL:username:password format (support http/https and www.)
+    url_user_pass_pattern = re.compile(r'((?:https?://|www\.)[^\s]+):([^:\s]+):([^\s]+)', re.IGNORECASE)
     matches = url_user_pass_pattern.findall(line)
     for url_part, user_part, pass_part in matches:
         combo = f"{url_part}:{user_part}:{pass_part}"
         if combo not in extracted:
             extracted.append(combo)
-        # If the username is an email, also add pure email:pass for filtering
-        if re.match(r'^[^:\s]+@[^:\s]+$', user_part):
-            email_pass_combo = f"{user_part}:{pass_part}"
-            if email_pass_combo not in extracted:
-                extracted.append(email_pass_combo)
+        # Always also add plain user:pass alongside triple
+        user_pass_combo = f"{user_part}:{pass_part}"
+        if user_pass_combo not in extracted:
+            extracted.append(user_pass_combo)
+
+    # Pattern 3b: protocol-less domain with path: username:password
+    domain_path_user_pass_pattern = re.compile(r'([a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/[^:\s]+):([^:\s]+):([^\s]+)')
+    matches = domain_path_user_pass_pattern.findall(line)
+    for url_part, user_part, pass_part in matches:
+        combo = f"{url_part}:{user_part}:{pass_part}"
+        if combo not in extracted:
+            extracted.append(combo)
+        user_pass_combo = f"{user_part}:{pass_part}"
+        if user_pass_combo not in extracted:
+            extracted.append(user_pass_combo)
+
+    # Pattern 3c: protocol-less bare domain: username:password
+    domain_user_pass_pattern = re.compile(r'([a-zA-Z0-9.-]+\.[a-zA-Z]{2,}):([^:\s]+):([^\s]+)')
+    matches = domain_user_pass_pattern.findall(line)
+    for url_part, user_part, pass_part in matches:
+        combo = f"{url_part}:{user_part}:{pass_part}"
+        if combo not in extracted:
+            extracted.append(combo)
+        user_pass_combo = f"{user_part}:{pass_part}"
+        if user_pass_combo not in extracted:
+            extracted.append(user_pass_combo)
     
-    # Pattern 3: URL:pass format (e.g., https://example.com:password)
+    # Pattern 4: URL:pass format (e.g., https://example.com:password)
     url_pass_pattern = re.compile(r'(https?://[^\s]+):([^\s]+)', re.IGNORECASE)
     matches = url_pass_pattern.findall(line)
     for match in matches:
@@ -233,17 +271,21 @@ def extract_credentials(line):
         if url_pass_combo not in extracted:
             extracted.append(url_pass_combo)
     
-    # Pattern 4: email:pass (preserving email:pass format)
-    email_pattern = re.compile(r'([^:\s]+@[^:\s]+):([^:\s]+)')
-    matches = email_pattern.findall(line)
-    for match in matches:
-        email_part = match[0]  # email
-        pass_part = match[1]  # pass
-        email_pass_combo = f"{email_part}:{pass_part}"
-        if email_pass_combo not in extracted:
-            extracted.append(email_pass_combo)
+    # Pattern 5: phone number or username:password (including phone numbers like +xxx or 10+ digit numbers)
+    # This pattern will match phone numbers and other non-email usernames
+    phone_username_pattern = re.compile(
+        r'([+]?[0-9]{7,15}|[a-zA-Z0-9._%+-]{3,50}|[a-zA-Z][a-zA-Z0-9._%+-]*[a-zA-Z0-9]):([^:\s]+)', 
+        re.IGNORECASE)
+    matches = phone_username_pattern.findall(line)
+    for user_part, pass_part in matches:
+        # Additional validation to make sure it's not a domain or other non-username format
+        if not re.search(r'\.(com|org|net|edu|gov|mil|int|co|uk|de|fr|it|es|ru|jp|cn|br|in|au|ca|mx|ar|cl|pe|ve|co|za|ng|ke|gh|eg|ma|dz|tn|ly|jo|sa|ae|qa|kw|om|bh|il|tr|ir|pk|bd|lk|my|sg|th|vn|ph|id|kh|mm|la|mn|kz|uz|kg|tj|tm|af|iq|sy|lb|ye|om|ae|sa|qa|bh|jo|il|tr|ir|pk|bd|lk|my|sg|th|vn|ph|id|kh|mm|la|mn|kz|uz|kg|tj|tm|af|iq|sy|lb|ye|in|us|uk|eu|be|nl|pl|se|no|dk|fi|is|pt|gr|hu|cz|ro|bg|hr|si|sk|ee|lv|lt|mt|lu|ie|at|ch|li|mc|sm|va|san|it|fr|de|es|pt|be|nl|lu|at|ch|li|mc|ad|gi|gg|je|im|uk|gb|sc|sd|ss|eh|tz|ug|rw|bi|zm|mw|mv|mu|ls|sz|km|sc|km|tz|ug|rw|bi|zm|mw|mv|mu|ls|sz|km|sc|km|tz|ug|rw|bi|zm|mw|mv|mu|ls|sz|km|sc|km|tz|ug|rw|bi|zm|mw|mv|mu|ls|sz|km|sc)$', user_part.lower()):
+            user_pass_combo = f"{user_part}:{pass_part}"
+            # Only add if it's not already in the extracted list and not an email (to avoid duplicates)
+            if user_pass_combo not in extracted and '@' not in user_part:
+                extracted.append(user_pass_combo)
     
-    # Pattern 5: general user:pass but filter out invalid formats
+    # Pattern 6: general user:pass but filter out invalid formats (run this last to catch remaining)
     general_pattern = re.compile(r'([^:\s]+):([^:\s]+)', re.IGNORECASE)
     matches = general_pattern.findall(line)
     for match in matches:
@@ -254,10 +296,11 @@ def extract_credentials(line):
         if (len(user_part) <= 100 and len(pass_part) <= 100 and  # Reasonable length
             not any(skip in user_part.lower() for skip in ['.com', '.org', '.net', '.php', '.html', '.js', '.css', '.txt']) and
             not any(skip in pass_part.lower() for skip in ['.com', '.org', '.net', '.php', '.html', '.js', '.css', '.txt']) and
-            not user_part.isdigit() and  # Skip if just numbers
-            not (user_part.startswith('/') or user_part.startswith('\\'))):  # Skip paths
+            not (user_part.startswith('/') or user_part.startswith('\\')) and  # Skip paths
+            not (user_part.startswith('http') or user_part.startswith('www'))):  # Skip if it looks like a URL
             
             user_pass_combo = f"{user_part}:{pass_part}"
+            # Only add if it's not already in the extracted list
             if user_pass_combo not in extracted:
                 extracted.append(user_pass_combo)
     
@@ -369,10 +412,11 @@ def search_domain(query):
                                         url_user_pass_results.append(cred)
                                 continue
 
-                            # 2) Pure email:pass (no URL prefix)
-                            if re.match(r'^[^:\s]+@[^:\s]+:[^\s]+$', cred):
-                                # We allow email:pass even though it doesn't include domain itself,
-                                # because it was extracted from a line that contains the domain
+                            # 2) Pure user:pass formats (email:pass, username:pass, phone:pass)
+                            # Check if it has the format of user:pass (doesn't start with http)
+                            if ':' in cred and not cred.lower().startswith('http') and cred.count(':') == 1:
+                                # We allow all user:pass formats even though they don't directly include domain,
+                                # because they were extracted from a line that contains the domain
                                 if cred not in user_pass_results:
                                     user_pass_results.append(cred)
                                 continue
@@ -472,14 +516,14 @@ def search_keywords(keywords):
                         for cred in credentials:
                             # Check if the credential contains the keyword
                             if keywords.lower() in cred.lower():
-                                # If it's an email format
-                                if '@' in cred:
+                                # For user:pass formats (doesn't start with http and has exactly one colon)
+                                if ':' in cred and not cred.lower().startswith('http') and cred.count(':') == 1:
                                     if cred not in user_pass_results:
                                         user_pass_results.append(cred)
-                                else:
-                                    # For general user:pass formats
-                                    if cred not in user_pass_results and cred not in url_user_pass_results:
-                                        user_pass_results.append(cred)
+                                # For URL:user:pass formats
+                                elif cred.lower().startswith('http') and ':' in cred:
+                                    if cred not in url_user_pass_results:
+                                        url_user_pass_results.append(cred)
                         
                         # Extract URLs from the line if it matches the keyword
                         urls = extract_urls(line)
