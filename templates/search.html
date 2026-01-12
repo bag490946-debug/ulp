@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Search - Credential Manager{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center mb-4">
+    <div>
+        <h1 class="h2 mb-1">Search</h1>
+        <p class="text-muted mb-0">Launch a background search task and track progress in real time.</p>
+    </div>
+    <a href="{{ url_for('my_searches') }}" class="btn btn-outline-secondary">View Tasks</a>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0"><i class="fas fa-search me-2"></i>Search Options</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="search_type" class="form-label">Search Type</label>
+                        <select class="form-select" id="search_type" name="search_type" required>
+                            <option value="domain">Domain Search</option>
+                            <option value="keyword">Keyword Search</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="query" class="form-label">Search Query</label>
+                        <input type="text" class="form-control" id="query" name="query" placeholder="Enter domain or keyword to search" required>
+                        <div class="form-text">For domain search: enter domain name (e.g., google.com)</div>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" value="on" id="include_schemes" name="include_schemes">
+                        <label class="form-check-label" for="include_schemes">
+                            Include non-http schemes (e.g., android://)
+                        </label>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Start Search</button>
+                    <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Cancel</a>
+                </form>
+            </div>
+        </div>
+        
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0"><i class="fas fa-info-circle me-2"></i>Search Tips</h5>
+            </div>
+            <div class="card-body">
+                <ul>
+                    <li><strong>Domain Search</strong>: Find credentials containing a specific domain (e.g., google.com)</li>
+                    <li><strong>Keyword Search</strong>: Find entries containing specific keywords</li>
+                    <li>Searches are case-insensitive</li>
+                    <li>Results include username:password, URL:username:password, and URL-only matches</li>
+                    <li>Progress updates live in the Tasks screen</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

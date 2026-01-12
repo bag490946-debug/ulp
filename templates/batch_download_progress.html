@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Batch Download Progress{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center mb-4">
+    <div>
+        <h1 class="h2 mb-1">Batch Download</h1>
+        <p class="text-muted mb-0">Tracking multiple downloads in one task.</p>
+    </div>
+    <button class="btn btn-outline-danger" id="cancelBatchBtn">Cancel Task</button>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-md-9">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0"><i class="fas fa-layer-group me-2"></i>Batch Progress</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <h6>Current: <span id="currentFile">Loading...</span></h6>
+                    <h6>Status: <span id="status" class="badge bg-info">Downloading</span></h6>
+                </div>
+                <div class="progress mb-3" style="height: 18px;">
+                    <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%;"></div>
+                </div>
+                <div class="row text-center">
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6 class="card-title">Completed</h6>
+                                <p class="card-text" id="completedCount">0</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6 class="card-title">Failed</h6>
+                                <p class="card-text" id="failedCount">0</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6 class="card-title">Total URLs</h6>
+                                <p class="card-text" id="totalCount">0</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6 class="card-title">Progress</h6>
+                                <p class="card-text" id="progressText">0%</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-4">
+                    <div class="section-title"><i class="fas fa-list text-muted"></i> Download Log</div>
+                    <div class="code-block mt-2 small" id="batchLogs">Waiting for updates...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const sessionId = '{{ session_id }}';
+
+function updateBatch() {
+    fetch('/api/batch_download_progress/' + sessionId)
+        .then(response => response.json())
+        .then(data => {
+            if (data.logs && data.logs.length) {
+                document.getElementById('batchLogs').textContent = data.logs.slice(-10).join('\n');
+            }
+            if (data.status === 'downloading') {
+                document.getElementById('status').textContent = 'Downloading';
+                document.getElementById('status').className = 'badge bg-info';
+            } else if (data.status === 'complete') {
+                document.getElementById('status').textContent = 'Complete';
+                document.getElementById('status').className = 'badge bg-success';
+                document.getElementById('cancelBatchBtn').disabled = true;
+            } else if (data.status === 'error') {
+                document.getElementById('status').textContent = 'Error';
+                document.getElementById('status').className = 'badge bg-danger';
+                document.getElementById('cancelBatchBtn').disabled = true;
+            } else if (data.status === 'cancelled') {
+                document.getElementById('status').textContent = 'Cancelled';
+                document.getElementById('status').className = 'badge bg-secondary';
+                document.getElementById('cancelBatchBtn').disabled = true;
+            }
+
+            document.getElementById('currentFile').textContent = data.current_file || '-';
+            document.getElementById('completedCount').textContent = data.completed || 0;
+            document.getElementById('failedCount').textContent = data.failed || 0;
+            document.getElementById('totalCount').textContent = data.total_urls || 0;
+            const progress = Math.round(data.progress || 0);
+            document.getElementById('progressText').textContent = progress + '%';
+            document.getElementById('progressBar').style.width = progress + '%';
+
+            if (data.status === 'downloading') {
+                setTimeout(updateBatch, 700);
+            }
+        })
+        .catch(() => {
+            setTimeout(updateBatch, 1200);
+        });
+}
+
+updateBatch();
+
+document.getElementById('cancelBatchBtn').addEventListener('click', () => {
+    fetch('/api/cancel_download/' + sessionId, { method: 'POST' })
+        .then(() => {
+            document.getElementById('cancelBatchBtn').disabled = true;
+        });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+{% block title %}Search Results - Credential Manager{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center mb-4">
+    <div>
+        <h1 class="h2 mb-1">Search Results</h1>
+        <p class="text-muted mb-0">Results for "{{ query }}" ({{ search_type }} search)</p>
+    </div>
+    <a href="{{ url_for('search') }}" class="btn btn-outline-secondary">New Search</a>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <div class="section-title">
+                    <i class="fas fa-layer-group text-muted"></i>
+                    Result Sets
+                </div>
+                <span class="badge bg-primary">{{ results|length }} total</span>
+            </div>
+            <div class="card-body">
+                {% if results %}
+                <div class="d-flex align-items-center justify-content-end mb-3 gap-2">
+                    <label class="form-label mb-0 me-2"><small>Page size</small></label>
+                    <select id="page-size-select" class="form-select form-select-sm" style="width:auto;">
+                        <option value="100">100</option>
+                        <option value="200" selected>200</option>
+                        <option value="500">500</option>
+                        <option value="1000">1000</option>
+                    </select>
+                </div>
+
+                <div class="accordion" id="resultsAccordion">
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="headingAll">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseAll">
+                                <i class="fas fa-list me-2"></i> All Results ({{ results|length }})
+                            </button>
+                        </h2>
+                        <div id="collapseAll" class="accordion-collapse collapse" data-bs-parent="#resultsAccordion">
+                            <div class="accordion-body">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <small class="text-muted">Showing <span id="all-shown-count">0</span> of {{ results|length }}</small>
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-outline-primary" onclick="loadNext('all')">Load next page</button>
+                                        <button class="btn btn-sm btn-outline-secondary" onclick="loadAll('all')">Load all</button>
+                                        <button class="btn btn-sm btn-outline-dark" onclick="resetSection('all')">Reset</button>
+                                    </div>
+                                </div>
+                                <div class="table-responsive">
+                                    <table class="table table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>#</th>
+                                                <th>Credential Entry</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for result in results %}
+                                            <tr class="all-row" style="display:none;">
+                                                <td>{{ loop.index }}</td>
+                                                <td><code>{{ result }}</code></td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="headingUserPass">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseUserPass">
+                                <i class="fas fa-user-lock me-2"></i> User:Pass ({{ user_pass_results|length }})
+                            </button>
+                        </h2>
+                        <div id="collapseUserPass" class="accordion-collapse collapse" data-bs-parent="#resultsAccordion">
+                            <div class="accordion-body">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <small class="text-muted">Showing <span id="userpass-shown-count">0</span> of {{ user_pass_results|length }}</small>
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-outline-primary" onclick="loadNext('userpass')">Load next page</button>
+                                        <button class="btn btn-sm btn-outline-secondary" onclick="loadAll('userpass')">Load all</button>
+                                        <button class="btn btn-sm btn-outline-dark" onclick="resetSection('userpass')">Reset</button>
+                                    </div>
+                                </div>
+                                <div class="table-responsive">
+                                    <table class="table table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>#</th>
+                                                <th>User:Pass Entry</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for result in user_pass_results %}
+                                            <tr class="userpass-row" style="display:none;">
+                                                <td>{{ loop.index }}</td>
+                                                <td><code>{{ result }}</code></td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="headingUrlUserPass">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseUrlUserPass">
+                                <i class="fas fa-link me-2"></i> URL:User:Pass ({{ url_user_pass_results|length }})
+                            </button>
+                        </h2>
+                        <div id="collapseUrlUserPass" class="accordion-collapse collapse" data-bs-parent="#resultsAccordion">
+                            <div class="accordion-body">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <small class="text-muted">Showing <span id="urluserpass-shown-count">0</span> of {{ url_user_pass_results|length }}</small>
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-outline-primary" onclick="loadNext('urluserpass')">Load next page</button>
+                                        <button class="btn btn-sm btn-outline-secondary" onclick="loadAll('urluserpass')">Load all</button>
+                                        <button class="btn btn-sm btn-outline-dark" onclick="resetSection('urluserpass')">Reset</button>
+                                    </div>
+                                </div>
+                                <div class="table-responsive">
+                                    <table class="table table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>#</th>
+                                                <th>URL:User:Pass Entry</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for result in url_user_pass_results %}
+                                            <tr class="urluserpass-row" style="display:none;">
+                                                <td>{{ loop.index }}</td>
+                                                <td><code>{{ result }}</code></td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="headingUrls">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseUrls">
+                                <i class="fas fa-globe me-2"></i> URLs ({{ url_results|length }})
+                            </button>
+                        </h2>
+                        <div id="collapseUrls" class="accordion-collapse collapse" data-bs-parent="#resultsAccordion">
+                            <div class="accordion-body">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <small class="text-muted">Showing <span id="urls-shown-count">0</span> of {{ url_results|length }}</small>
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-outline-primary" onclick="loadNext('urls')">Load next page</button>
+                                        <button class="btn btn-sm btn-outline-secondary" onclick="loadAll('urls')">Load all</button>
+                                        <button class="btn btn-sm btn-outline-dark" onclick="resetSection('urls')">Reset</button>
+                                    </div>
+                                </div>
+                                <div class="table-responsive">
+                                    <table class="table table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>#</th>
+                                                <th>URL</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for result in url_results %}
+                                            <tr class="urls-row" style="display:none;">
+                                                <td>{{ loop.index }}</td>
+                                                <td><code>{{ result }}</code></td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="headingErc">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseErc">
+                                <i class="fas fa-coins me-2"></i> ERC Tokens ({{ erc_token_results|length }})
+                            </button>
+                        </h2>
+                        <div id="collapseErc" class="accordion-collapse collapse" data-bs-parent="#resultsAccordion">
+                            <div class="accordion-body">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <small class="text-muted">Showing <span id="erc-shown-count">0</span> of {{ erc_token_results|length }}</small>
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-outline-primary" onclick="loadNext('erc')">Load next page</button>
+                                        <button class="btn btn-sm btn-outline-secondary" onclick="loadAll('erc')">Load all</button>
+                                        <button class="btn btn-sm btn-outline-dark" onclick="resetSection('erc')">Reset</button>
+                                    </div>
+                                </div>
+                                <div class="table-responsive">
+                                    <table class="table table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>#</th>
+                                                <th>Token</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for result in erc_token_results %}
+                                            <tr class="erc-row" style="display:none;">
+                                                <td>{{ loop.index }}</td>
+                                                <td><code>{{ result }}</code></td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-4">
+                    <a href="{{ url_for('download_results', task_id=task_id, search_type='user_pass') }}" class="btn btn-sm btn-warning">
+                        <i class="fas fa-download me-1"></i>User:Pass
+                    </a>
+                    <a href="{{ url_for('download_results', task_id=task_id, search_type='url_user_pass') }}" class="btn btn-sm btn-info">
+                        <i class="fas fa-download me-1"></i>URL:User:Pass
+                    </a>
+                    <a href="{{ url_for('download_results', task_id=task_id, search_type='urls') }}" class="btn btn-sm btn-outline-primary">
+                        <i class="fas fa-download me-1"></i>URLs
+                    </a>
+                    <a href="{{ url_for('download_results', task_id=task_id, search_type='erc_tokens') }}" class="btn btn-sm btn-outline-dark">
+                        <i class="fas fa-download me-1"></i>ERC Tokens
+                    </a>
+                    <a href="{{ url_for('download_results', task_id=task_id, search_type='all') }}" class="btn btn-sm btn-primary">
+                        <i class="fas fa-download me-1"></i>All Results
+                    </a>
+                </div>
+                {% else %}
+                <div class="text-center py-5">
+                    <i class="fas fa-search fa-3x text-muted mb-3"></i>
+                    <p class="lead">No results found for "{{ query }}"</p>
+                    <a href="{{ url_for('search') }}" class="btn btn-primary">Try Another Search</a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const DEFAULT_PAGE_SIZE = 200;
+const sections = ['all','userpass','urluserpass','urls','erc'];
+
+function getPageSize() {
+  const sel = document.getElementById('page-size-select');
+  const val = sel ? parseInt(sel.value, 10) : DEFAULT_PAGE_SIZE;
+  return isNaN(val) ? DEFAULT_PAGE_SIZE : val;
+}
+
+function loadMore(kind, count) {
+  const rows = document.querySelectorAll(`.${kind}-row`);
+  let shown = 0;
+  rows.forEach(r => { if (r.style.display !== 'none') shown++; });
+  let added = 0;
+  for (let i = shown; i < rows.length && added < count; i++) {
+    rows[i].style.display = '';
+    added++;
+  }
+  updateShownCounts();
+}
+
+function loadNext(kind) {
+  loadMore(kind, getPageSize());
+}
+
+function loadAll(kind) {
+  const rows = document.querySelectorAll(`.${kind}-row`);
+  rows.forEach(r => r.style.display = '');
+  updateShownCounts();
+}
+
+function resetSection(kind) {
+  const rows = document.querySelectorAll(`.${kind}-row`);
+  rows.forEach(r => r.style.display = 'none');
+  loadMore(kind, getPageSize());
+}
+
+function updateShownCounts() {
+  const mapping = {
+    all: 'all-shown-count',
+    userpass: 'userpass-shown-count',
+    urluserpass: 'urluserpass-shown-count',
+    urls: 'urls-shown-count',
+    erc: 'erc-shown-count'
+  };
+  Object.keys(mapping).forEach(kind => {
+    const rows = document.querySelectorAll(`.${kind}-row`);
+    let shown = 0;
+    rows.forEach(r => { if (r.style.display !== 'none') shown++; });
+    const el = document.getElementById(mapping[kind]);
+    if (el) el.innerText = shown;
+  });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  sections.forEach(kind => loadMore(kind, getPageSize()));
+  const sel = document.getElementById('page-size-select');
+  if (sel) sel.addEventListener('change', () => {
+    sections.forEach(kind => resetSection(kind));
+  });
+});
+</script>
+{% endblock %}

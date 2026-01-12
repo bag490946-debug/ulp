@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Search Tasks - Credential Manager{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center mb-4">
+    <div>
+        <h1 class="h2 mb-1">Search Tasks</h1>
+        <p class="text-muted mb-0">Live status for every search, with progress and logs.</p>
+    </div>
+    <a href="{{ url_for('search') }}" class="btn btn-outline-secondary">New Search</a>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <div class="section-title"><i class="fas fa-wave-square text-muted"></i> Active & Recent Tasks</div>
+    </div>
+    <div class="card-body">
+        {% if tasks %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Query</th>
+                        <th>Type</th>
+                        <th>Status</th>
+                        <th>Progress</th>
+                        <th>Results</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for task in tasks %}
+                    <tr data-task-id="{{ task[0] }}">
+                        <td>{{ task[1] }}</td>
+                        <td>{{ task[2] }}</td>
+                        <td>
+                            <span class="status-pill status-{{ task[4] }}" data-status>{{ task[4] }}</span>
+                        </td>
+                        <td style="min-width: 220px;">
+                            <div class="progress" style="height: 8px;">
+                                <div class="progress-bar" role="progressbar" style="width: {{ task[13] or 0 }}%;" data-progress></div>
+                            </div>
+                            <small class="text-muted" data-progress-text>{{ (task[13] or 0)|round(1) }}%</small>
+                        </td>
+                        <td data-results>{{ task[7] }}</td>
+                        <td>
+                            <div class="btn-group btn-group-sm" role="group">
+                                <a href="{{ url_for('view_search_results', task_id=task[0]) }}" class="btn btn-outline-primary {% if task[4] != 'completed' %}disabled{% endif %}" data-view>View</a>
+                                <button class="btn btn-outline-danger" data-cancel {% if task[4] in ['completed', 'error', 'cancelled'] %}disabled{% endif %}>Cancel</button>
+                            </div>
+                        </td>
+                    </tr>
+                    <tr data-task-logs="{{ task[0] }}">
+                        <td colspan="6">
+                            <div class="code-block small" data-log-box>Loading logs...</div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted mb-0">No searches yet. Start one to see live progress.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const statusClassMap = {
+    queued: 'status-pill status-queued',
+    processing: 'status-pill status-processing',
+    completed: 'status-pill status-completed',
+    error: 'status-pill status-error',
+    cancelled: 'status-pill status-cancelled'
+};
+
+function updateTaskRow(taskId) {
+    fetch('/api/search_task_status/' + taskId)
+        .then(response => response.json())
+        .then(data => {
+            const row = document.querySelector(`tr[data-task-id="${taskId}"]`);
+            const logRow = document.querySelector(`tr[data-task-logs="${taskId}"]`);
+            if (!row) return;
+            const statusEl = row.querySelector('[data-status]');
+            const progressEl = row.querySelector('[data-progress]');
+            const progressText = row.querySelector('[data-progress-text]');
+            const resultEl = row.querySelector('[data-results]');
+            const viewBtn = row.querySelector('[data-view]');
+            const cancelBtn = row.querySelector('[data-cancel]');
+            const logBox = logRow ? logRow.querySelector('[data-log-box]') : null;
+
+            statusEl.textContent = data.status;
+            statusEl.className = statusClassMap[data.status] || 'status-pill';
+            progressEl.style.width = (data.progress || 0) + '%';
+            progressText.textContent = (data.progress || 0).toFixed(1) + '%';
+            resultEl.textContent = data.result_count || 0;
+            if (data.status === 'completed') {
+                viewBtn.classList.remove('disabled');
+                cancelBtn.disabled = true;
+            }
+            if (data.status === 'error' || data.status === 'cancelled') {
+                cancelBtn.disabled = true;
+            }
+            if (logBox && data.logs) {
+                logBox.textContent = data.logs.slice(-8).join('\n') || 'No logs yet.';
+            }
+        });
+}
+
+function refreshAll() {
+    document.querySelectorAll('tr[data-task-id]').forEach(row => {
+        updateTaskRow(row.dataset.taskId);
+    });
+    setTimeout(refreshAll, 1200);
+}
+
+document.querySelectorAll('[data-cancel]').forEach(btn => {
+    btn.addEventListener('click', (event) => {
+        const row = event.target.closest('tr[data-task-id]');
+        if (!row) return;
+        fetch('/api/cancel_search/' + row.dataset.taskId, { method: 'POST' })
+            .then(() => {
+                btn.disabled = true;
+            });
+    });
+});
+
+refreshAll();
+</script>
+{% endblock %}

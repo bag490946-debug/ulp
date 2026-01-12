@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}Download Progress{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center mb-4">
+    <div>
+        <h1 class="h2 mb-1">Download Progress</h1>
+        <p class="text-muted mb-0">Tracking live download status.</p>
+    </div>
+    <button class="btn btn-outline-danger" id="cancelDownloadBtn">Cancel Task</button>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0"><i class="fas fa-download me-2"></i>Downloading File</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <h6>File: <span id="filename">Loading...</span></h6>
+                    <h6>Status: <span id="status" class="badge bg-info">Downloading</span></h6>
+                </div>
+                
+                <div class="progress mb-3" style="height: 30px;">
+                    <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                         role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                        <span id="progressText">0%</span>
+                    </div>
+                </div>
+                
+                <div class="row text-center">
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6 class="card-title">Downloaded</h6>
+                                <p class="card-text" id="downloaded">0 MB</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6 class="card-title">Total Size</h6>
+                                <p class="card-text" id="totalSize">0 MB</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6 class="card-title">Speed</h6>
+                                <p class="card-text" id="speed">0 MB/s</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6 class="card-title">ETA</h6>
+                                <p class="card-text" id="eta">Calculating...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mt-3 text-center" id="completeSection" style="display: none;">
+                    <div class="alert alert-success">
+                        <i class="fas fa-check-circle me-2"></i>Download completed successfully!
+                    </div>
+                    <a href="{{ url_for('files') }}" class="btn btn-primary">View My Files</a>
+                </div>
+                
+                <div class="mt-3 text-center" id="errorSection" style="display: none;">
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-circle me-2"></i><span id="errorMessage">An error occurred</span>
+                    </div>
+                    <a href="{{ url_for('upload') }}" class="btn btn-primary">Try Again</a>
+                </div>
+                <div class="mt-3">
+                    <div class="section-title"><i class="fas fa-terminal text-muted"></i> Logs</div>
+                    <div class="code-block mt-2 small" id="downloadLogs">Waiting for updates...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const sessionId = '{{ session_id }}';
+
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 MB';
+    const mb = bytes / (1024 * 1024);
+    return mb.toFixed(2) + ' MB';
+}
+
+function formatSpeed(bytesPerSecond) {
+    const mbps = bytesPerSecond / (1024 * 1024);
+    return mbps.toFixed(2) + ' MB/s';
+}
+
+function formatTime(seconds) {
+    if (seconds === 0 || !isFinite(seconds)) return 'Calculating...';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return mins + 'm ' + secs + 's';
+}
+
+function updateProgress() {
+    fetch('/api/download_progress/' + sessionId)
+        .then(response => response.json())
+        .then(data => {
+            if (data.logs && data.logs.length) {
+                document.getElementById('downloadLogs').textContent = data.logs.slice(-8).join('\n');
+            }
+            if (data.status === 'downloading') {
+                document.getElementById('filename').textContent = data.filename || 'Unknown';
+                document.getElementById('status').textContent = 'Downloading';
+                document.getElementById('status').className = 'badge bg-info';
+                
+                const progress = Math.round(data.progress);
+                document.getElementById('progressBar').style.width = progress + '%';
+                document.getElementById('progressBar').setAttribute('aria-valuenow', progress);
+                document.getElementById('progressText').textContent = progress + '%';
+                
+                document.getElementById('downloaded').textContent = formatBytes(data.downloaded);
+                document.getElementById('totalSize').textContent = formatBytes(data.total_size);
+                document.getElementById('speed').textContent = formatSpeed(data.speed);
+                document.getElementById('eta').textContent = formatTime(data.eta);
+                
+                setTimeout(updateProgress, 500);
+            } else if (data.status === 'complete') {
+                document.getElementById('status').textContent = 'Complete';
+                document.getElementById('status').className = 'badge bg-success';
+                document.getElementById('progressBar').style.width = '100%';
+                document.getElementById('progressText').textContent = '100%';
+                document.getElementById('progressBar').classList.remove('progress-bar-animated');
+                document.getElementById('completeSection').style.display = 'block';
+                document.getElementById('cancelDownloadBtn').disabled = true;
+            } else if (data.status === 'error') {
+                document.getElementById('status').textContent = 'Error';
+                document.getElementById('status').className = 'badge bg-danger';
+                document.getElementById('errorMessage').textContent = data.error || 'An error occurred';
+                document.getElementById('errorSection').style.display = 'block';
+                document.getElementById('progressBar').classList.remove('progress-bar-animated');
+                document.getElementById('cancelDownloadBtn').disabled = true;
+            } else if (data.status === 'cancelled') {
+                document.getElementById('status').textContent = 'Cancelled';
+                document.getElementById('status').className = 'badge bg-secondary';
+                document.getElementById('errorMessage').textContent = 'Download cancelled.';
+                document.getElementById('errorSection').style.display = 'block';
+                document.getElementById('progressBar').classList.remove('progress-bar-animated');
+                document.getElementById('cancelDownloadBtn').disabled = true;
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching progress:', error);
+            setTimeout(updateProgress, 1000);
+        });
+}
+
+// Start updating progress
+updateProgress();
+
+document.getElementById('cancelDownloadBtn').addEventListener('click', () => {
+    fetch('/api/cancel_download/' + sessionId, { method: 'POST' })
+        .then(() => {
+            document.getElementById('cancelDownloadBtn').disabled = true;
+        });
+});
+</script>
+{% endblock %}
