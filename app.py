@@ -11,6 +11,7 @@ import sqlite3
 import json
 import shutil
 import multiprocessing
+import zipfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Dict, List, Tuple, Optional
 from werkzeug.utils import secure_filename
@@ -230,6 +231,15 @@ def delete_file_record(file_id):
     cursor = conn.cursor()
     
     cursor.execute('DELETE FROM global_files WHERE id = ?', (file_id,))
+    conn.commit()
+    conn.close()
+
+
+def delete_search_task_record(task_id: str) -> None:
+    """Delete a search task record from the database."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM search_tasks WHERE id = ?', (task_id,))
     conn.commit()
     conn.close()
 
@@ -1534,6 +1544,22 @@ def cancel_search(task_id):
     return {'status': 'cancelled'}
 
 
+@app.route('/api/delete_search/<task_id>', methods=['POST'])
+def delete_search(task_id):
+    if not is_authenticated():
+        return {'error': 'Not authenticated'}, 401
+
+    if not get_search_task(task_id):
+        return {'error': 'Task not found'}, 404
+
+    delete_search_task_record(task_id)
+    with search_task_lock:
+        search_tasks.pop(task_id, None)
+    with search_task_controls_lock:
+        search_task_controls.pop(task_id, None)
+    return {'status': 'deleted'}
+
+
 @app.route('/api/start_batch_download', methods=['POST'])
 def start_batch_download():
     """API endpoint to start batch download"""
@@ -1848,6 +1874,53 @@ def download_results(task_id, search_type):
     # Return the temporary file for download
     return send_file(temp_file_path, as_attachment=True, download_name=filename, 
                      mimetype='text/plain', conditional=True)
+
+
+@app.route('/download_results_zip/<task_id>')
+def download_results_zip(task_id):
+    if not is_authenticated():
+        return redirect(url_for('access_key'))
+
+    with search_task_lock:
+        results = search_tasks.get(task_id, {'all': [], 'user_pass': [], 'url_user_pass': [], 'urls': [], 'erc_tokens': []})
+
+    task = get_search_task(task_id)
+    if not task:
+        flash('Search task not found', 'error')
+        return redirect(url_for('my_searches'))
+
+    _, query, _, _, _, _, _, _, _, _, _, _, _, _ = task
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    zip_name = f"search_results_{query.replace(' ', '_')}_{timestamp}.zip"
+
+    temp_dir = tempfile.mkdtemp()
+    files_to_write = {
+        'all_results.txt': results.get('all', []),
+        'user_pass.txt': results.get('user_pass', []),
+        'url_user_pass.txt': results.get('url_user_pass', []),
+        'urls.txt': results.get('urls', []),
+        'erc_tokens.txt': results.get('erc_tokens', [])
+    }
+
+    try:
+        for filename, data in files_to_write.items():
+            file_path = os.path.join(temp_dir, filename)
+            with open(file_path, 'w') as f:
+                for line in data:
+                    f.write(line + '\n')
+
+        zip_path = os.path.join(temp_dir, zip_name)
+        with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+            for filename in files_to_write.keys():
+                zf.write(os.path.join(temp_dir, filename), arcname=filename)
+
+        return send_file(zip_path, as_attachment=True, download_name=zip_name,
+                         mimetype='application/zip', conditional=True)
+    finally:
+        try:
+            shutil.rmtree(temp_dir)
+        except Exception as cleanup_error:
+            logger.error(f"Error cleaning up temp zip dir {temp_dir}: {cleanup_error}")
 
 
 # Template rendering functions
@@ -2663,6 +2736,19 @@ if (uploadForm) {
                             <div class="btn-group btn-group-sm" role="group">
                                 <a href="{{ url_for('view_search_results', task_id=task[0]) }}" class="btn btn-outline-primary {% if task[4] != 'completed' %}disabled{% endif %}" data-view>View</a>
                                 <button class="btn btn-outline-danger" data-cancel {% if task[4] in ['completed', 'error', 'cancelled'] %}disabled{% endif %}>Cancel</button>
+                                <a href="{{ url_for('download_results', task_id=task[0], search_type='user_pass') }}" class="btn btn-outline-warning {% if task[4] != 'completed' %}disabled{% endif %}" title="Download user:pass">
+                                    <i class="fas fa-arrow-down"></i> User:Pass
+                                </a>
+                                <a href="{{ url_for('download_results', task_id=task[0], search_type='url_user_pass') }}" class="btn btn-outline-info {% if task[4] != 'completed' %}disabled{% endif %}" title="Download url:user:pass">
+                                    <i class="fas fa-arrow-down"></i> URL:User:Pass
+                                </a>
+                                <a href="{{ url_for('download_results', task_id=task[0], search_type='all') }}" class="btn btn-outline-primary {% if task[4] != 'completed' %}disabled{% endif %}" title="Download all results">
+                                    <i class="fas fa-arrow-down"></i> All
+                                </a>
+                                <a href="{{ url_for('download_results_zip', task_id=task[0]) }}" class="btn btn-outline-dark {% if task[4] != 'completed' %}disabled{% endif %}" title="Download zip of all result sets">
+                                    <i class="fas fa-file-archive"></i> ZIP
+                                </a>
+                                <button class="btn btn-outline-secondary" data-delete>Delete</button>
                             </div>
                         </td>
                     </tr>
@@ -2738,6 +2824,19 @@ document.querySelectorAll('[data-cancel]').forEach(btn => {
         fetch('/api/cancel_search/' + row.dataset.taskId, { method: 'POST' })
             .then(() => {
                 btn.disabled = true;
+            });
+    });
+});
+
+document.querySelectorAll('[data-delete]').forEach(btn => {
+    btn.addEventListener('click', (event) => {
+        const row = event.target.closest('tr[data-task-id]');
+        if (!row) return;
+        fetch('/api/delete_search/' + row.dataset.taskId, { method: 'POST' })
+            .then(() => {
+                const logRow = document.querySelector(`tr[data-task-logs="${row.dataset.taskId}"]`);
+                row.remove();
+                if (logRow) logRow.remove();
             });
     });
 });
