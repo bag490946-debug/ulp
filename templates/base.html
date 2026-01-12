@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Credential Manager{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        :root {
+            --bg: #f6f3ed;
+            --panel: #ffffff;
+            --ink: #17181c;
+            --muted: #6b7280;
+            --accent: #0ea5a4;
+            --accent-2: #f59e0b;
+            --danger: #e11d48;
+            --border: rgba(20, 20, 22, 0.08);
+            --shadow: 0 12px 30px rgba(17, 24, 39, 0.08);
+        }
+        body {
+            font-family: "Space Grotesk", sans-serif;
+            color: var(--ink);
+            background: radial-gradient(circle at top left, rgba(14, 165, 164, 0.08), transparent 45%),
+                        radial-gradient(circle at 15% 60%, rgba(245, 158, 11, 0.08), transparent 50%),
+                        var(--bg);
+        }
+        code, pre {
+            font-family: "JetBrains Mono", monospace;
+        }
+        .app-shell {
+            min-height: 100vh;
+            display: grid;
+            grid-template-columns: 260px 1fr;
+        }
+        .sidebar {
+            background: linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.86));
+            color: #f8fafc;
+            padding: 1.5rem 1rem;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+        }
+        .sidebar .brand {
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            font-size: 0.85rem;
+            color: rgba(248, 250, 252, 0.7);
+            margin-bottom: 2rem;
+        }
+        .nav-link {
+            color: rgba(248, 250, 252, 0.72);
+            border-radius: 14px;
+            margin-bottom: 0.25rem;
+            padding: 0.75rem 1rem;
+        }
+        .nav-link.active, .nav-link:hover {
+            background: rgba(248, 250, 252, 0.12);
+            color: #f8fafc;
+        }
+        .main-content {
+            padding: 2rem 2.5rem 3rem;
+        }
+        .topbar {
+            background: rgba(255, 255, 255, 0.8);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 0.75rem 1.25rem;
+            box-shadow: var(--shadow);
+        }
+        .card {
+            border-radius: 18px;
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
+            background: var(--panel);
+        }
+        .card-header {
+            background: transparent;
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 1.25rem;
+        }
+        .btn-primary {
+            background-color: var(--accent);
+            border-color: var(--accent);
+        }
+        .btn-primary:hover {
+            background-color: #0c8d8c;
+            border-color: #0c8d8c;
+        }
+        .btn-warning {
+            background-color: var(--accent-2);
+            border-color: var(--accent-2);
+        }
+        .badge-soft {
+            background: rgba(14, 165, 164, 0.15);
+            color: var(--accent);
+            border-radius: 999px;
+            padding: 0.35rem 0.75rem;
+            font-weight: 600;
+        }
+        .section-title {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 1.15rem;
+            font-weight: 600;
+        }
+        .text-muted {
+            color: var(--muted) !important;
+        }
+        .progress {
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.08);
+        }
+        .progress-bar {
+            background: linear-gradient(90deg, var(--accent), #22d3ee);
+        }
+        .status-pill {
+            border-radius: 999px;
+            padding: 0.25rem 0.75rem;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        .status-queued { background: rgba(245, 158, 11, 0.15); color: #b45309; }
+        .status-processing { background: rgba(14, 165, 164, 0.18); color: #0f766e; }
+        .status-completed { background: rgba(16, 185, 129, 0.2); color: #047857; }
+        .status-error { background: rgba(225, 29, 72, 0.15); color: var(--danger); }
+        .status-cancelled { background: rgba(107, 114, 128, 0.2); color: #374151; }
+        .code-block {
+            background: rgba(15, 23, 42, 0.08);
+            border-radius: 14px;
+            padding: 1rem;
+        }
+        .nav-tabs {
+            flex-wrap: wrap;
+            gap: 0.35rem;
+        }
+        .nav-tabs .nav-link {
+            border-radius: 999px;
+        }
+        .btn-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.35rem;
+        }
+        .btn-group .btn {
+            border-radius: 999px;
+        }
+        .table td .btn-group {
+            justify-content: flex-start;
+        }
+        .form-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        @media (max-width: 992px) {
+            .app-shell {
+                grid-template-columns: 1fr;
+            }
+            .sidebar {
+                position: relative;
+                height: auto;
+                border-radius: 0 0 24px 24px;
+            }
+            .main-content {
+                padding: 1.5rem 1.25rem 2rem;
+            }
+            .topbar {
+                flex-direction: column;
+                align-items: flex-start !important;
+                gap: 0.75rem;
+            }
+            .sidebar .nav {
+                flex-direction: row;
+                flex-wrap: nowrap;
+                overflow-x: auto;
+                gap: 0.25rem;
+            }
+            .sidebar .nav-link {
+                white-space: nowrap;
+            }
+            .btn-group {
+                flex-wrap: wrap;
+                gap: 0.35rem;
+            }
+            .table {
+                font-size: 0.9rem;
+            }
+            .card-header, .card-body {
+                padding: 1rem;
+            }
+            .progress {
+                height: 12px;
+            }
+        }
+        @media (max-width: 576px) {
+            .btn {
+                width: 100%;
+            }
+            .btn-group .btn,
+            .form-actions .btn {
+                width: auto;
+                flex: 1 1 auto;
+            }
+            .table-responsive {
+                border-radius: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="sidebar">
+            <div class="brand">Credential Vault</div>
+            <ul class="nav flex-column">
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">
+                        <i class="fas fa-tachometer-alt me-2"></i>Dashboard
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'upload' %}active{% endif %}" href="{{ url_for('upload') }}">
+                        <i class="fas fa-upload me-2"></i>Upload
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'search' %}active{% endif %}" href="{{ url_for('search') }}">
+                        <i class="fas fa-search me-2"></i>Search
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'files' %}active{% endif %}" href="{{ url_for('files') }}">
+                        <i class="fas fa-folder me-2"></i>Files
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'my_searches' %}active{% endif %}" href="{{ url_for('my_searches') }}">
+                        <i class="fas fa-wave-square me-2"></i>Tasks
+                    </a>
+                </li>
+            </ul>
+        </aside>
+
+        <main class="main-content">
+            <div class="topbar d-flex align-items-center justify-content-between mb-4">
+                <div class="d-flex align-items-center gap-2">
+                    <i class="fas fa-shield-alt text-muted"></i>
+                    <span class="fw-semibold">Credential Manager</span>
+                    <span class="badge-soft">Live</span>
+                </div>
+                <div class="d-flex align-items-center gap-3">
+                    {% if logged_in_user %}
+                    <span class="text-muted">Hello, <strong>{{ logged_in_user }}</strong></span>
+                    {% endif %}
+                    <a href="{{ url_for('logout') }}" class="btn btn-outline-secondary btn-sm">Logout</a>
+                </div>
+            </div>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ 'danger' if category == 'error' else 'warning' if category == 'info' else 'success' }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>
