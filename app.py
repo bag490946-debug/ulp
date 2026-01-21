@@ -565,9 +565,32 @@ def extract_domain_from_url(url: str) -> str:
 
 EMAIL_COMBO_PATTERN = re.compile(r'([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+):([^\s:]+)')
 USER_COMBO_PATTERN = re.compile(r'\b([a-zA-Z0-9_.+-]{3,}):([^\s:]+)\b')
+EMAIL_PASS_PATTERN = re.compile(
+    r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\s*[:|]\s*([^\s|:]+)'
+)
+EMAIL_PASS_WS_PATTERN = re.compile(
+    r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\s+([^\s|:]+)'
+)
 URL_PATH_USER_BLOCKLIST = {
     'signup', 'login', 'signin', 'register', 'account', 'accounts', 'auth'
 }
+COMBO_USER_BLOCKLIST = {
+    'signup', 'sign-up', 'sign_up', 'signin', 'sign-in', 'sign_in', 'login', 'log-in',
+    'log_in', 'register', 'id-id', 'id_id', 'mobile-legends', 'mobile_legends'
+}
+ARABIC_PERSIAN_RE = re.compile(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]')
+
+
+def is_bad_combo(user: str, pwd: str) -> bool:
+    if not user or not pwd:
+        return True
+    if any(ch.isspace() for ch in user) or any(ch.isspace() for ch in pwd):
+        return True
+    if ARABIC_PERSIAN_RE.search(user) or ARABIC_PERSIAN_RE.search(pwd):
+        return True
+    if len(user) < 2 or len(pwd) < 2:
+        return True
+    return False
 
 
 def extract_credentials(line):
@@ -576,9 +599,15 @@ def extract_credentials(line):
     if not line:
         return []
 
-    email_matches = EMAIL_COMBO_PATTERN.findall(line)
-    if email_matches:
-        email, pwd = email_matches[-1]
+    email_pass_matches = []
+    email_pass_matches.extend(EMAIL_PASS_PATTERN.findall(line))
+    email_pass_matches.extend(EMAIL_PASS_WS_PATTERN.findall(line))
+    if not email_pass_matches:
+        email_pass_matches = EMAIL_COMBO_PATTERN.findall(line)
+    if email_pass_matches:
+        email, pwd = email_pass_matches[-1]
+        if is_bad_combo(email, pwd):
+            return []
         return [f"{email.lower()}:{pwd}"]
 
     has_path = '/' in line or '://' in line
@@ -591,7 +620,9 @@ def extract_credentials(line):
         if not user or not pwd or '/' in user:
             return []
         user_lower = user.lower()
-        if user_lower in URL_PATH_USER_BLOCKLIST:
+        if user_lower in URL_PATH_USER_BLOCKLIST or user_lower in COMBO_USER_BLOCKLIST:
+            return []
+        if is_bad_combo(user, pwd):
             return []
         if '.' in user and '@' not in user:
             return []
@@ -601,7 +632,9 @@ def extract_credentials(line):
     if user_matches:
         user, pwd = user_matches[-1]
         user_lower = user.lower()
-        if user_lower in URL_PATH_USER_BLOCKLIST:
+        if user_lower in URL_PATH_USER_BLOCKLIST or user_lower in COMBO_USER_BLOCKLIST:
+            return []
+        if is_bad_combo(user, pwd):
             return []
         if '@' not in user and '.' in user:
             return []
