@@ -565,10 +565,13 @@ def extract_domain_from_url(url: str) -> str:
 
 EMAIL_COMBO_PATTERN = re.compile(r'([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+):([^\s:]+)')
 USER_COMBO_PATTERN = re.compile(r'\b([a-zA-Z0-9_.+-]{3,}):([^\s:]+)\b')
+URL_PATH_USER_BLOCKLIST = {
+    'signup', 'login', 'signin', 'register', 'account', 'accounts', 'auth'
+}
 
 
 def extract_credentials(line):
-    """Extract email:pass or user:pass combos using the simplified patterns."""
+    """Extract email:pass or user:pass combos with URL/path-aware filtering."""
     line = line.strip()
     if not line:
         return []
@@ -578,11 +581,31 @@ def extract_credentials(line):
         email, pwd = email_matches[-1]
         return [f"{email.lower()}:{pwd}"]
 
+    has_path = '/' in line or '://' in line
+    if has_path:
+        parts = [part.strip() for part in line.split(':')]
+        if len(parts) < 3:
+            return []
+        user = parts[-2]
+        pwd = parts[-1]
+        if not user or not pwd or '/' in user:
+            return []
+        user_lower = user.lower()
+        if user_lower in URL_PATH_USER_BLOCKLIST:
+            return []
+        if '.' in user and '@' not in user:
+            return []
+        return [f"{user}:{pwd}"]
+
     user_matches = USER_COMBO_PATTERN.findall(line)
     if user_matches:
         user, pwd = user_matches[-1]
-        if "@" not in user:
-            return [f"{user}:{pwd}"]
+        user_lower = user.lower()
+        if user_lower in URL_PATH_USER_BLOCKLIST:
+            return []
+        if '@' not in user and '.' in user:
+            return []
+        return [f"{user}:{pwd}"]
 
     return []
 
@@ -823,6 +846,7 @@ def search_domain(query, include_schemes: bool = False):
 def search_keywords(keywords, include_schemes: bool = False):
     if not keywords:
         return {'all': [], 'user_pass': [], 'url_user_pass': [], 'urls': [], 'erc_tokens': []}
+    kw = keywords.lower()
     
     # Get selected global files from database
     global_files = get_selected_files()
@@ -843,7 +867,7 @@ def search_keywords(keywords, include_schemes: bool = False):
                 for line in f:
                     line = line.strip()
                     # Case-insensitive search
-                    if keywords.lower() in line.lower():
+                    if kw in line.lower():
                         # Skip non-http(s) scheme lines if disabled
                         if (not include_schemes) and re.match(r'^[a-z][a-z0-9+.-]*://', line, re.IGNORECASE) and not re.match(r'^https?://', line, re.IGNORECASE):
                             continue
@@ -867,7 +891,7 @@ def search_keywords(keywords, include_schemes: bool = False):
                         # Extract ERC tokens from the line if it matches the keyword
                         erc_tokens = extract_erc_tokens(line)
                         for token in erc_tokens:
-                            if keywords.lower() in token.lower():
+                            if kw in token.lower():
                                 if token not in erc_token_results:
                                     erc_token_results.append(token)
         except Exception as e:
