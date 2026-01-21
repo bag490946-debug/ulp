@@ -578,7 +578,14 @@ COMBO_USER_BLOCKLIST = {
     'signup', 'sign-up', 'sign_up', 'signin', 'sign-in', 'sign_in', 'login', 'log-in',
     'log_in', 'register', 'id-id', 'id_id', 'mobile-legends', 'mobile_legends'
 }
+BAD_PASSWORDS = {
+    '[not_saved]', 'not_saved', 'not-saved', 'not saved', 'notsaved', 'null', 'none'
+}
+NON_COMBO_PHRASES = (
+    'old or unknown version', 'notemmysbirthday', 'unknown version', '██████', '██'
+)
 ARABIC_PERSIAN_RE = re.compile(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]')
+EMAIL_RE = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 
 
 def is_bad_combo(user: str, pwd: str) -> bool:
@@ -590,7 +597,54 @@ def is_bad_combo(user: str, pwd: str) -> bool:
         return True
     if len(user) < 2 or len(pwd) < 2:
         return True
+    if any(phrase in user.lower() or phrase in pwd.lower() for phrase in NON_COMBO_PHRASES):
+        return True
+    if pwd.strip().lower() in BAD_PASSWORDS:
+        return True
     return False
+
+
+def is_blocked_user(user: str) -> bool:
+    user_lower = user.lower()
+    if user_lower in URL_PATH_USER_BLOCKLIST or user_lower in COMBO_USER_BLOCKLIST:
+        return True
+    if 'http' in user_lower or 'www.' in user_lower or '/' in user_lower:
+        return True
+    if '.' in user and '@' not in user:
+        return True
+    return False
+
+
+def looks_like_email(value: str) -> bool:
+    return bool(EMAIL_RE.match(value.strip()))
+
+
+def extract_url_user_pass(line: str) -> List[str]:
+    """Extract url:user:pass combos from a line, if the prefix looks like a real URL/domain."""
+    normalized = line.strip().replace('|', ':')
+    if normalized.count(':') < 2:
+        return []
+
+    parts = [part.strip() for part in normalized.split(':')]
+    if len(parts) < 3:
+        return []
+
+    url_part = ':'.join(parts[:-2]).strip()
+    user = parts[-2]
+    pwd = parts[-1]
+
+    if not url_part or not user or not pwd:
+        return []
+    if is_blocked_user(user) or is_bad_combo(user, pwd):
+        return []
+    if looks_like_email(pwd):
+        return []
+
+    domain = extract_domain_from_url(url_part)
+    if not domain or '.' not in domain:
+        return []
+
+    return [f"{url_part}:{user}:{pwd}"]
 
 
 def extract_credentials(line):
@@ -599,44 +653,58 @@ def extract_credentials(line):
     if not line:
         return []
 
+    normalized = line.replace('|', ':')
+    if re.match(r'^(https?://|android://|www\.)', normalized, re.IGNORECASE):
+        parts = [part.strip() for part in normalized.split(':')]
+        if len(parts) >= 3:
+            user = parts[-2]
+            pwd = parts[-1]
+            if is_blocked_user(user) or is_bad_combo(user, pwd):
+                return []
+            if looks_like_email(pwd):
+                return []
+            return [f"{user.lower()}:{pwd}" if looks_like_email(user) else f"{user}:{pwd}"]
+
     email_pass_matches = []
-    email_pass_matches.extend(EMAIL_PASS_PATTERN.findall(line))
-    email_pass_matches.extend(EMAIL_PASS_WS_PATTERN.findall(line))
+    email_pass_matches.extend(EMAIL_PASS_PATTERN.findall(normalized))
+    email_pass_matches.extend(EMAIL_PASS_WS_PATTERN.findall(normalized))
     if not email_pass_matches:
-        email_pass_matches = EMAIL_COMBO_PATTERN.findall(line)
+        email_pass_matches = EMAIL_COMBO_PATTERN.findall(normalized)
     if email_pass_matches:
         email, pwd = email_pass_matches[-1]
         if is_bad_combo(email, pwd):
             return []
         return [f"{email.lower()}:{pwd}"]
 
-    has_path = '/' in line or '://' in line
+    has_path = '/' in normalized or '://' in normalized
     if has_path:
-        parts = [part.strip() for part in line.split(':')]
+        parts = [part.strip() for part in normalized.split(':')]
         if len(parts) < 3:
             return []
         user = parts[-2]
         pwd = parts[-1]
         if not user or not pwd or '/' in user:
             return []
-        user_lower = user.lower()
-        if user_lower in URL_PATH_USER_BLOCKLIST or user_lower in COMBO_USER_BLOCKLIST:
+        if is_blocked_user(user):
             return []
         if is_bad_combo(user, pwd):
             return []
         if '.' in user and '@' not in user:
             return []
+        if looks_like_email(pwd):
+            return []
         return [f"{user}:{pwd}"]
 
-    user_matches = USER_COMBO_PATTERN.findall(line)
+    user_matches = USER_COMBO_PATTERN.findall(normalized)
     if user_matches:
         user, pwd = user_matches[-1]
-        user_lower = user.lower()
-        if user_lower in URL_PATH_USER_BLOCKLIST or user_lower in COMBO_USER_BLOCKLIST:
+        if is_blocked_user(user):
             return []
         if is_bad_combo(user, pwd):
             return []
         if '@' not in user and '.' in user:
+            return []
+        if looks_like_email(pwd):
             return []
         return [f"{user}:{pwd}"]
 
@@ -677,8 +745,20 @@ def extract_urls(line):
     # Add 'http://' prefix to www URLs to make them proper URLs
     formatted_www = [f"http://{url}" for url in www_urls]
     extracted_urls.extend(formatted_www)
-    
-    return list(set(extracted_urls))  # Remove duplicates
+
+    def url_has_embedded_credentials(url: str) -> bool:
+        if '@' in url:
+            return True
+        trimmed = re.sub(r'^[a-z][a-z0-9+.-]*://', '', url, flags=re.IGNORECASE)
+        return bool(re.search(r':[^\s/]+:[^\s/]+$', trimmed))
+
+    cleaned_urls = []
+    for url in extracted_urls:
+        if url_has_embedded_credentials(url):
+            continue
+        cleaned_urls.append(url)
+
+    return list(set(cleaned_urls))  # Remove duplicates
 
 
 def extract_erc_tokens(line):
@@ -749,6 +829,10 @@ def search_file_worker(file_path: str, search_type: str, query: str, include_sch
                 for cred in credentials:
                     user_pass_results.add(cred)
 
+                url_user_passes = extract_url_user_pass(line)
+                for uup in url_user_passes:
+                    url_user_pass_results.add(uup)
+
                 urls = extract_urls(line)
                 for url in urls:
                     if search_type == 'domain':
@@ -810,6 +894,11 @@ def search_domain(query, include_schemes: bool = False):
                         for cred in credentials:
                             if cred not in user_pass_results:
                                 user_pass_results.append(cred)
+
+                        url_user_passes = extract_url_user_pass(line)
+                        for uup in url_user_passes:
+                            if uup not in url_user_pass_results:
+                                url_user_pass_results.append(uup)
                         
                         # Extract URLs from the line if it contains the domain
                         urls = extract_urls(line)
@@ -910,6 +999,11 @@ def search_keywords(keywords, include_schemes: bool = False):
                         for cred in credentials:
                             if cred not in user_pass_results:
                                 user_pass_results.append(cred)
+
+                        url_user_passes = extract_url_user_pass(line)
+                        for uup in url_user_passes:
+                            if uup not in url_user_pass_results:
+                                url_user_pass_results.append(uup)
                         
                         # Extract URLs from the line if it matches the keyword
                         urls = extract_urls(line)
