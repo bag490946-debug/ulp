@@ -17,7 +17,7 @@ from typing import Dict, List, Tuple, Optional
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime
 import hashlib
 import pickle
 import io
@@ -193,17 +193,14 @@ def init_db():
     conn.close()
 
 def save_file_record(file_name, file_size, file_path):
-    """Save file record to database with expiry time"""
+    """Save file record to database"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
-    # Calculate expiry time (24 hours from now)
-    expiry_time = datetime.now() + timedelta(hours=24)
-    
+
     cursor.execute('''
         INSERT INTO global_files (file_name, file_size, file_path, upload_date, expiry_date)
-        VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?)
-    ''', (file_name, file_size, file_path, expiry_time))
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP, NULL)
+    ''', (file_name, file_size, file_path))
     
     conn.commit()
     conn.close()
@@ -216,9 +213,8 @@ def get_global_files():
     cursor.execute('''
         SELECT id, file_name, file_size, file_path, upload_date 
         FROM global_files 
-        WHERE expiry_date IS NULL OR expiry_date >= ?
         ORDER BY upload_date DESC
-    ''', (datetime.now(),))
+    ''')
     
     files = cursor.fetchall()
     conn.close()
@@ -251,8 +247,8 @@ def get_file_by_id(file_id):
     cursor.execute('''
         SELECT id, file_name, file_size, file_path 
         FROM global_files 
-        WHERE id = ? AND (expiry_date IS NULL OR expiry_date >= ?)
-    ''', (file_id, datetime.now()))
+        WHERE id = ?
+    ''', (file_id,))
     file_info = cursor.fetchone()
     conn.close()
     
@@ -285,9 +281,9 @@ def get_selected_files():
     cursor.execute('''
         SELECT id, file_name, file_size, file_path, upload_date 
         FROM global_files 
-        WHERE is_selected = 1 AND (expiry_date IS NULL OR expiry_date >= ?)
+        WHERE is_selected = 1
         ORDER BY upload_date DESC
-    ''', (datetime.now(),))
+    ''')
     
     files = cursor.fetchall()
     conn.close()
@@ -470,71 +466,6 @@ init_db()
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
 
-
-# Auto-delete expired files
-def cleanup_expired_files():
-    """Delete files that have expired (older than 24 hours)"""
-    while True:
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            
-            # Find expired files
-            cursor.execute('''
-                SELECT id, file_path FROM global_files 
-                WHERE expiry_date IS NOT NULL AND expiry_date < ?
-            ''', (datetime.now(),))
-            
-            expired_files = cursor.fetchall()
-            
-            for file_id, file_path in expired_files:
-                # Delete file from filesystem
-                try:
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                        logger.info(f"Auto-deleted expired file: {file_path}")
-                except Exception as e:
-                    logger.error(f"Error deleting expired file {file_path}: {e}")
-                
-                # Delete record from database
-                cursor.execute('DELETE FROM global_files WHERE id = ?', (file_id,))
-            
-            conn.commit()
-            conn.close()
-            
-        except Exception as e:
-            logger.error(f"Error in cleanup_expired_files: {e}")
-        
-        # Run cleanup every hour
-        time.sleep(3600)
-
-# Run cleanup once on startup to avoid stale entries
-def cleanup_expired_files_once():
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT id, file_path FROM global_files 
-            WHERE expiry_date IS NOT NULL AND expiry_date < ?
-        ''', (datetime.now(),))
-        expired_files = cursor.fetchall()
-        for file_id, file_path in expired_files:
-            try:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-                    logger.info(f"Auto-deleted expired file: {file_path}")
-            except Exception as e:
-                logger.error(f"Error deleting expired file {file_path}: {e}")
-            cursor.execute('DELETE FROM global_files WHERE id = ?', (file_id,))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        logger.error(f"Error in cleanup_expired_files_once: {e}")
-
-# Start cleanup thread
-cleanup_expired_files_once()
-cleanup_thread = threading.Thread(target=cleanup_expired_files, daemon=True)
-cleanup_thread.start()
 
 
 # Clean URL for searching
@@ -1246,10 +1177,10 @@ def upload():
                 if is_ajax:
                     return {
                         'status': 'complete',
-                        'message': f'File "{filename}" uploaded successfully. Auto-delete in 24 hours.',
+                        'message': f'File "{filename}" uploaded successfully.',
                         'redirect': url_for('files')
                     }
-                flash(f'File "{filename}" uploaded successfully! Will auto-delete after 24 hours.', 'success')
+                flash(f'File "{filename}" uploaded successfully!', 'success')
                 return redirect(url_for('files'))
     
     return render_template('upload.html')
@@ -2277,7 +2208,7 @@ def write_templates():
             <div class="card-body">
                 <div class="section-title"><i class="fas fa-database text-muted"></i> Total Files</div>
                 <h3 class="mt-2">{{ total_files }}</h3>
-                <p class="text-muted mb-0">Auto-deleted after 24 hours.</p>
+                <p class="text-muted mb-0">Stored in local storage.</p>
             </div>
         </div>
     </div>
@@ -2439,7 +2370,7 @@ def write_templates():
                             <div class="mb-3">
                                 <label for="file" class="form-label">Choose a text file to upload</label>
                                 <input type="file" class="form-control" id="file" name="file" accept=".txt" required>
-                                <div class="form-text">Only text files (.txt) up to 80 GB. Files auto-delete after 24 hours.</div>
+                                <div class="form-text">Only text files (.txt) up to 80 GB.</div>
                             </div>
                             <button type="submit" class="btn btn-primary" id="uploadBtn">
                                 <i class="fas fa-upload me-1"></i>Upload File
@@ -2474,7 +2405,7 @@ def write_templates():
                                 <label for="download_url" class="form-label">Paste Download URL</label>
                                 <input type="url" class="form-control" id="download_url" name="download_url"
                                        placeholder="https://example.com/file.txt" required>
-                                <div class="form-text">Paste the direct download link to the file. Files auto-delete after 24 hours.</div>
+                                <div class="form-text">Paste the direct download link to the file.</div>
                             </div>
                             <button type="submit" class="btn btn-success" id="downloadBtn">
                                 <i class="fas fa-download me-1"></i>Start Download
@@ -2493,7 +2424,7 @@ def write_templates():
                                           placeholder="https://clck.ru/3QSC88
 https://clck.ru/3QSC88
 https://clck.ru/3QSC88" required></textarea>
-                                <div class="form-text">Enter one URL per line (or paste separated by spaces/commas). Maximum 50 URLs. Files auto-delete after 24 hours.</div>
+                                <div class="form-text">Enter one URL per line (or paste separated by spaces/commas). Maximum 50 URLs.</div>
                             </div>
                             <button type="submit" class="btn btn-success" id="multiDownloadBtn">
                                 <i class="fas fa-download me-1"></i>Start Multiple Downloads
@@ -2515,7 +2446,7 @@ https://clck.ru/3QSC88" required></textarea>
                     <li>Files will be stored securely in your account</li>
                     <li>You can search through your uploaded files after uploading</li>
                     <li><strong>Max upload size:</strong> 80 GB per file</li>
-                    <li><strong>Auto-deletion:</strong> All files automatically delete after 24 hours</li>
+                    <li><strong>Retention:</strong> Files stay until you delete them</li>
                     <li>Supports various combo formats including decorated headers</li>
                 </ul>
             </div>
