@@ -21,6 +21,7 @@ from datetime import datetime
 import hashlib
 import pickle
 import io
+import telebot
 
 
 # Configure logging
@@ -44,6 +45,14 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_SIZE_BYTES
 # Access key
 ACCESS_KEY = '@BaignX'
 
+# Telegram bot configuration
+BOT_TOKEN = os.environ.get(
+    "BOT_TOKEN",
+    "8554912173:AAHMEDNvy-lG7rlsuErjpFlcEC4v20zgjwI"
+)
+ADMIN_ID = int(os.environ.get("UPLOADER_ADMIN_ID", "7265489223"))
+WEB_BASE_URL = os.environ.get("WEB_BASE_URL", "").rstrip("/")
+
 # Constants
 TELEGRAM_MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB (Telegram limit)
 
@@ -63,6 +72,9 @@ DB_PATH = "bot_database.db"
 # Search task queue
 search_tasks = {}
 search_task_lock = threading.Lock()
+
+# Telegram bot instance
+telegram_bot = telebot.TeleBot(BOT_TOKEN)
 
 
 def append_task_log(task_store: Dict[str, Dict], task_id: str, message: str, lock: threading.Lock) -> None:
@@ -130,6 +142,151 @@ def update_download_progress(session_id: str, **updates) -> None:
     with download_progress_lock:
         if session_id in download_progress:
             download_progress[session_id].update(updates)
+
+
+def format_bytes(size: int) -> str:
+    if size <= 0:
+        return "Unknown"
+    units = ["B", "KB", "MB", "GB", "TB"]
+    value = float(size)
+    unit = 0
+    while value >= 1024 and unit < len(units) - 1:
+        value /= 1024
+        unit += 1
+    return f"{value:.2f} {units[unit]}"
+
+
+def format_eta(seconds: float) -> str:
+    if seconds <= 0 or seconds == float("inf"):
+        return "Unknown"
+    seconds = int(seconds)
+    hours, rem = divmod(seconds, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours:d}h {minutes:02d}m {secs:02d}s"
+    return f"{minutes:d}m {secs:02d}s"
+
+
+def extract_task_id(task_ref: str) -> Optional[str]:
+    if not task_ref:
+        return None
+    match = re.search(r"[a-fA-F0-9]{32}", task_ref)
+    return match.group(0) if match else None
+
+
+def extract_url(text: str) -> Optional[str]:
+    if not text:
+        return None
+    match = re.search(r"https?://\S+", text)
+    if not match:
+        return None
+    url = match.group(0).strip()
+    return url.rstrip(").,;\"'")
+
+
+def build_task_link(task_id: str) -> str:
+    if WEB_BASE_URL:
+        return f"{WEB_BASE_URL}/download_progress/{task_id}"
+    return f"download_progress/{task_id}"
+
+
+def is_admin_message(message) -> bool:
+    return message and message.from_user and message.from_user.id == ADMIN_ID
+
+
+def start_download_from_bot(url: str) -> str:
+    session_id = secrets.token_hex(16)
+    thread = threading.Thread(target=download_file_from_url, args=(url, session_id))
+    thread.daemon = True
+    thread.start()
+    return session_id
+
+
+def register_bot_handlers() -> None:
+    start_text = (
+        "Uploader bot ready.\n\n"
+        "Commands:\n"
+        "/start - Show commands\n"
+        "/status {task_id} - Check download status (task ID or full link)\n\n"
+        "Send a download link to start a task."
+    )
+
+    @telegram_bot.message_handler(commands=['start'])
+    def handle_start(message):
+        if not is_admin_message(message):
+            return
+        telegram_bot.send_message(message.chat.id, start_text)
+
+    @telegram_bot.message_handler(commands=['status'])
+    def handle_status(message):
+        if not is_admin_message(message):
+            return
+        text = message.text or ""
+        parts = text.split(maxsplit=1)
+        if len(parts) < 2:
+            telegram_bot.send_message(message.chat.id, "Usage: /status {task_id or full link}")
+            return
+        task_id = extract_task_id(parts[1].strip())
+        if not task_id:
+            telegram_bot.send_message(message.chat.id, "Invalid task ID or link.")
+            return
+        progress = download_progress.get(task_id)
+        if not progress:
+            telegram_bot.send_message(message.chat.id, "Task not found.")
+            return
+        total_size = progress.get("total_size", 0) or 0
+        downloaded = progress.get("downloaded", 0) or 0
+        eta = progress.get("eta", 0) or 0
+        percent = progress.get("progress", 0) or 0
+        status = progress.get("status", "unknown")
+        reply = (
+            f"Status: {status}\n"
+            f"Total file size: {format_bytes(total_size)}\n"
+            f"ETA: {format_eta(eta)}\n"
+            f"Download progress: {percent:.2f}% ({format_bytes(downloaded)} downloaded)"
+        )
+        telegram_bot.send_message(message.chat.id, reply)
+
+    @telegram_bot.message_handler(content_types=['text'])
+    def handle_text(message):
+        if not is_admin_message(message):
+            return
+        text = message.text or ""
+        url = extract_url(text)
+        if not url and message.caption:
+            url = extract_url(message.caption)
+        if not url:
+            return
+        task_id = start_download_from_bot(url)
+        task_link = build_task_link(task_id)
+        telegram_bot.send_message(
+            message.chat.id,
+            f"Your task has started. Open this link after web work.\n\n{task_link}"
+        )
+
+
+def start_telegram_bot() -> None:
+    register_bot_handlers()
+
+    def run_bot():
+        try:
+            telegram_bot.send_message(ADMIN_ID, "Uploader is up.")
+        except Exception as exc:
+            logger.error(f"Failed to send startup message: {exc}")
+        telegram_bot.infinity_polling(skip_pending=True)
+
+    thread = threading.Thread(target=run_bot)
+    thread.daemon = True
+    thread.start()
+
+
+def should_start_bot() -> bool:
+    if os.environ.get("DISABLE_TELEBOT") == "1":
+        return False
+    env = os.environ.get("FLASK_ENV", "production")
+    if env == "development":
+        return os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+    return True
 
 def init_db():
     """Initialize the SQLite database with required tables"""
@@ -1366,7 +1523,7 @@ def batch_download_files(urls, session_id):
 @app.route('/download_progress/<session_id>')
 def download_progress_page(session_id):
     """Show download progress page"""
-    if not is_authenticated():
+    if not is_authenticated() and session_id not in download_progress:
         return redirect(url_for('access_key'))
     
     return render_template('download_progress.html', session_id=session_id)
@@ -1375,7 +1532,7 @@ def download_progress_page(session_id):
 @app.route('/batch_download_progress/<session_id>')
 def batch_download_progress_page(session_id):
     """Show batch download progress page"""
-    if not is_authenticated():
+    if not is_authenticated() and session_id not in download_progress:
         return redirect(url_for('access_key'))
     
     return render_template('batch_download_progress.html', session_id=session_id)
@@ -1384,7 +1541,7 @@ def batch_download_progress_page(session_id):
 @app.route('/api/download_progress/<session_id>')
 def get_download_progress(session_id):
     """API endpoint to get download progress"""
-    if not is_authenticated():
+    if not is_authenticated() and session_id not in download_progress:
         return {'error': 'Not authenticated'}, 401
     
     progress = download_progress.get(session_id, {
@@ -1399,7 +1556,7 @@ def get_download_progress(session_id):
 @app.route('/api/batch_download_progress/<session_id>')
 def get_batch_download_progress(session_id):
     """API endpoint to get batch download progress"""
-    if not is_authenticated():
+    if not is_authenticated() and session_id not in download_progress:
         return {'error': 'Not authenticated'}, 401
     
     progress = download_progress.get(session_id, {
@@ -3586,6 +3743,10 @@ document.getElementById('cancelBatchBtn').addEventListener('click', () => {
 
 # Initialize templates
 write_templates()
+
+# Start Telegram bot alongside the web service
+if should_start_bot():
+    start_telegram_bot()
 
 
 if __name__ == '__main__':
